@@ -36,6 +36,7 @@
 #include "driverlib/sysctl.h"
 #include "driverlib/uart.h"
 #include "driverlib/pwm.h"
+#include "driverlib/adc.h"
 #include <string.h>
 
 #ifdef DEBUG
@@ -91,13 +92,24 @@ void GPIO_init(void)
     // Enable GPIO Port F
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
+    // Enable GPIO Port E
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+
     while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
     {
     }
 
-    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2);
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOE))
+    {
+    }
 
-    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
+    // re add pin 3 to regular init ( not needed for PWM anymore )
+    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
+
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3, 0);
+
+    // Configure PE3 as analog input
+    ROM_GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);
 }
 
 
@@ -211,6 +223,39 @@ void PWM_init(void)
     PWMGenEnable(PWM1_BASE, PWM_GEN_3);
 }
 
+void ADC0_init(void)
+{
+    // Enable ADC0 peripheral
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
+
+    // Wait for ADC0 to be ready
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_ADC0))
+    {
+    }
+
+    // Configure ADC0 Sample Sequencer 3
+    ADCSequenceConfigure(ADC0_BASE, 3,
+                         ADC_TRIGGER_PROCESSOR, 0);
+
+    // Configure Sequencer 3 to sample PE3
+    ADCSequenceStepConfigure(ADC0_BASE, 3, 0,
+                             ADC_CTL_CH0 |
+                             ADC_CTL_IE |
+                             ADC_CTL_END);
+
+    // Clear pending ADC interrupt
+    ADCIntClear(ADC0_BASE, 3);
+
+    // Enable ADC Sequencer interrupt
+    ADCIntEnable(ADC0_BASE, 3);
+
+    // Enable NVIC interrupt
+    ROM_IntEnable(INT_ADC0SS3);
+
+    // Enable Sample Sequencer 3
+    ADCSequenceEnable(ADC0_BASE, 3);
+}
+
 
 //*****************************************************************************
 //
@@ -221,7 +266,6 @@ void PWM_init(void)
 void forward(void)
 {
     UART1Send((uint8_t *)"Move Forward\r\n", sizeof("Move Forward\r\n")-1);
-
     UARTSend((uint8_t *)"Move Forward\r\n", sizeof("Move Forward\r\n")-1);
 }
 
@@ -339,7 +383,7 @@ void UART1IntHandler(void)
             case 1:
 
                 // First character - BLUE
-                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_2);
+                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_2);
 
                 command[0] = inputChar;
 
@@ -349,7 +393,7 @@ void UART1IntHandler(void)
             case 2:
 
                 // Second character - RED
-                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_1);
+                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_1);
 
                 command[1] = inputChar;
 
@@ -358,7 +402,7 @@ void UART1IntHandler(void)
 
             case 0:
 
-                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
+                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
 
                 command[2] = inputChar;
 
@@ -383,6 +427,27 @@ void UART1IntHandler(void)
     }
 }
 
+//*****************************************************************************
+//                                                                             
+// ADC0 Sample Sequencer 3 Interrupt Handler                                                  
+//                                                                             
+//**************************************************************************** 
+
+volatile uint32_t adcValue = 0;
+
+void ADC0Seq3IntHandler(void)
+{
+    uint32_t result;
+
+    // Clear ADC interrupt
+    ADCIntClear(ADC0_BASE, 3);
+
+    // Read ADC conversion result
+    ADCSequenceDataGet(ADC0_BASE, 3, &result);
+
+    // Store result globally
+    adcValue = result;
+}
 
 //*****************************************************************************
 //
@@ -418,7 +483,10 @@ main(void)
 
     UART1_init();
 
-    PWM_init();
+    // no longer need PWM
+    // PWM_init();
+
+    ADC0_init();
 
 
     // Enable processor interrupts after peripherals are initialized
@@ -445,9 +513,9 @@ main(void)
     // Start at 50% duty cycle
     //-------------------------------------------------------------------------
 
-    uint32_t duty = pwmPeriod / 2;
+    //uint32_t duty = pwmPeriod / 2;
 
-    bool increasing = true;
+    //bool increasing = true;
 
 
     //-------------------------------------------------------------------------
@@ -456,42 +524,15 @@ main(void)
 
     while(1)
     {
-        if(pwmRunning)
-        {
-            // Increase duty cycle from 50% toward 100%
-            if(increasing)
-            {
-                duty += 5;
+        //PWM fading loop removed
 
-                if(duty >= pwmPeriod - 1)
-                {
-                    duty = pwmPeriod - 1;
+        // Trigger ADC0 Sample Sequencer 3
+        ADCProcessorTrigger(ADC0_BASE, 3);
 
-                    increasing = false;
-                }
-            }
-
-            // Decrease duty cycle toward 0%
-            else
-            {
-                if(duty > 5)
-                {
-                    duty -= 5;
-                }
-
-                else
-                {
-                    duty = 1;
-
-                    increasing = true;
-                }
-            }
-
-            // Configure PWM with new pulse width
-            PWMPulseWidthSet(PWM1_BASE, PWM_OUT_7, duty);
-
-            // Delay so brightness transition is visible
-            SysCtlDelay(ROM_SysCtlClockGet() / 300);
-        }
+        // Wait approximately 50 milliseconds
+        SysCtlDelay(ROM_SysCtlClockGet() / 60);
+        
+    
+    
     }
 }
