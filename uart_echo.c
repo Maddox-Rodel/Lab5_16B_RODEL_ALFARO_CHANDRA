@@ -38,6 +38,7 @@
 #include "driverlib/pwm.h"
 #include "driverlib/adc.h"
 #include <string.h>
+#include <stdio.h>
 
 #ifdef DEBUG
 void
@@ -434,6 +435,7 @@ void UART1IntHandler(void)
 //**************************************************************************** 
 
 volatile uint32_t adcValue = 0;
+volatile float sensorVoltage = 0.0f;
 
 void ADC0Seq3IntHandler(void)
 {
@@ -447,6 +449,9 @@ void ADC0Seq3IntHandler(void)
 
     // Store result globally
     adcValue = result;
+
+    // Convert ADC reading into voltage
+    sensorVoltage = ((float)result * 3.3f) / 4095.0f;
 }
 
 //*****************************************************************************
@@ -522,6 +527,8 @@ main(void)
     // Main Loop
     //-------------------------------------------------------------------------
 
+    char adcMessage[80];
+
     while(1)
     {
         //PWM fading loop removed
@@ -531,8 +538,19 @@ main(void)
 
         // Wait approximately 50 milliseconds
         SysCtlDelay(ROM_SysCtlClockGet() / 60);
+
+        // Format ADC and voltage readings
+        int length = snprintf(adcMessage, sizeof(adcMessage),
+                              "ADC: %lu | Voltage: %lu mV\r\n",
+                              (unsigned long)adcValue,
+                              (unsigned long)(sensorVoltage * 1000.0f));
+
+        // Send to UART0 terminal
+        if(length > 0 && length < sizeof(adcMessage))
+        {
+            UARTSend((uint8_t *)adcMessage, (uint32_t)length);
+
         
-    
-    
-    }
+        
+        }
 }
