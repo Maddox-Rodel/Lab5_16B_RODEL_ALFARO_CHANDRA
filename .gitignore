@@ -1,0 +1,11 @@
+# CCS build files
+*.obj
+*.d
+*.map
+*.out
+*.launch
+*.json
+
+# CCS build directories
+Debug/
+Release/
