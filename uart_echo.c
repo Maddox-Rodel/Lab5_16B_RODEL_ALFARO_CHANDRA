@@ -52,6 +52,8 @@ uint32_t charCount = 0;
 
 char command[4];
 
+volatile float distance_cm = 0.0f;
+
 
 // PWM variables
 uint32_t pwmPeriod;
@@ -279,7 +281,7 @@ void backward(void)
 
 void left(void)
 {
-    UART1Send((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1) 
+    UART1Send((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1);
     UARTSend((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1);
 }
 
@@ -298,7 +300,7 @@ void startPWM(void)
     // Turn RED and BLUE off
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
 
-    UART1Send((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1)     
+    UART1Send((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1);
     UARTSend((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1);
 }
 
@@ -452,7 +454,57 @@ void ADC0Seq3IntHandler(void)
 
     // Convert ADC reading into voltage
     sensorVoltage = ((float)result * 3.3f) / 4095.0f;
+    distance_cm = 12.5f / (sensorVoltage + 0.1f);
 }
+
+void UARTSendNumber(uint32_t number)
+{
+    char digits[10];
+    int i = 0;
+
+    if(number == 0)
+    {
+        UARTCharPut(UART0_BASE, '0');
+        return;
+    }
+
+    while(number > 0)
+    {
+        digits[i++] = '0' + (number % 10);
+        number /= 10;
+    }
+
+    while(i > 0)
+    {
+        UARTCharPut(UART0_BASE, digits[--i]);
+    }
+}
+
+void updateDistanceLED(float distance)
+{
+    if(distance >= 10.0f)
+    {
+        // GREEN
+        GPIOPinWrite(GPIO_PORTF_BASE,
+                     GPIO_PIN_1 | GPIO_PIN_3,
+                     GPIO_PIN_3);
+    }
+    else if(distance >= 8.0f)
+    {
+        // YELLOW (Red + Green)
+        GPIOPinWrite(GPIO_PORTF_BASE,
+                     GPIO_PIN_1 | GPIO_PIN_3,
+                     GPIO_PIN_1 | GPIO_PIN_3);
+    }
+    else
+    {
+        // RED
+        GPIOPinWrite(GPIO_PORTF_BASE,
+                     GPIO_PIN_1 | GPIO_PIN_3,
+                     GPIO_PIN_1);
+    }
+}
+
 
 //*****************************************************************************
 //
@@ -527,30 +579,32 @@ main(void)
     // Main Loop
     //-------------------------------------------------------------------------
 
-    char adcMessage[80];
-
     while(1)
     {
-        //PWM fading loop removed
-
-        // Trigger ADC0 Sample Sequencer 3
+        // Trigger ADC conversion
         ADCProcessorTrigger(ADC0_BASE, 3);
 
-        // Wait approximately 50 milliseconds
+        // Wait approximately 50 ms
         SysCtlDelay(ROM_SysCtlClockGet() / 60);
 
-        // Format ADC and voltage readings
-        int length = snprintf(adcMessage, sizeof(adcMessage),
-                              "ADC: %lu | Voltage: %lu mV\r\n",
-                              (unsigned long)adcValue,
-                              (unsigned long)(sensorVoltage * 1000.0f));
+        // Update LED based on distance
+        updateDistanceLED(distance_cm);
 
-        // Send to UART0 terminal
-        if(length > 0 && length < sizeof(adcMessage))
-        {
-            UARTSend((uint8_t *)adcMessage, (uint32_t)length);
+        // Print ADC reading
+        UARTSend((uint8_t *)"ADC: ", 5);
+        UARTSendNumber(adcValue);
 
-        
-        
-        }
+        // Print voltage in millivolts
+        uint32_t voltage_mV = (adcValue * 3300UL) / 4095UL;
+
+        UARTSend((uint8_t *)" | Voltage: ", 12);
+        UARTSendNumber(voltage_mV);
+
+        // Print estimated distance
+        UARTSend((uint8_t *)" mV | Distance: ", 16);
+        UARTSendNumber((uint32_t)distance_cm);
+
+        UARTSend((uint8_t *)" cm\r\n", 5);
+    }
+
 }
