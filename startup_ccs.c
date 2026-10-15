@@ -60,14 +60,6 @@ extern void UARTIntHandler(void);
 extern void UART1IntHandler(void);
 
 //*****************************************************************************
-//                                                                             
-// External declaration for the interrupt handler for ADC0   
-//                                                                             
-//*****************************************************************************
-extern void ADC0Seq3IntHandler(void);
-
-
-//*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
 // ensure that it ends up at physical address 0x0000.0000 or at the start of
@@ -111,7 +103,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // ADC Sequence 0
     IntDefaultHandler,                      // ADC Sequence 1
     IntDefaultHandler,                      // ADC Sequence 2
-    ADC0Seq3IntHandler,                      // ADC Sequence 3
+    IntDefaultHandler,                      // ADC Sequence 3
     IntDefaultHandler,                      // Watchdog timer
     IntDefaultHandler,                      // Timer 0 subtimer A
     IntDefaultHandler,                      // Timer 0 subtimer B

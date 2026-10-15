@@ -36,9 +36,7 @@
 #include "driverlib/sysctl.h"
 #include "driverlib/uart.h"
 #include "driverlib/pwm.h"
-#include "driverlib/adc.h"
 #include <string.h>
-#include <stdio.h>
 
 #ifdef DEBUG
 void
@@ -51,8 +49,6 @@ __error__(char *pcFilename, uint32_t ui32Line)
 uint32_t charCount = 0;
 
 char command[4];
-
-volatile float distance_cm = 0.0f;
 
 
 // PWM variables
@@ -95,24 +91,13 @@ void GPIO_init(void)
     // Enable GPIO Port F
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
-    // Enable GPIO Port E
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
-
     while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
     {
     }
 
-    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOE))
-    {
-    }
+    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2);
 
-    // re add pin 3 to regular init ( not needed for PWM anymore )
-    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
-
-    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3, 0);
-
-    // Configure PE3 as analog input
-    ROM_GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
 }
 
 
@@ -226,39 +211,6 @@ void PWM_init(void)
     PWMGenEnable(PWM1_BASE, PWM_GEN_3);
 }
 
-void ADC0_init(void)
-{
-    // Enable ADC0 peripheral
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
-
-    // Wait for ADC0 to be ready
-    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_ADC0))
-    {
-    }
-
-    // Configure ADC0 Sample Sequencer 3
-    ADCSequenceConfigure(ADC0_BASE, 3,
-                         ADC_TRIGGER_PROCESSOR, 0);
-
-    // Configure Sequencer 3 to sample PE3
-    ADCSequenceStepConfigure(ADC0_BASE, 3, 0,
-                             ADC_CTL_CH0 |
-                             ADC_CTL_IE |
-                             ADC_CTL_END);
-
-    // Clear pending ADC interrupt
-    ADCIntClear(ADC0_BASE, 3);
-
-    // Enable ADC Sequencer interrupt
-    ADCIntEnable(ADC0_BASE, 3);
-
-    // Enable NVIC interrupt
-    ROM_IntEnable(INT_ADC0SS3);
-
-    // Enable Sample Sequencer 3
-    ADCSequenceEnable(ADC0_BASE, 3);
-}
-
 
 //*****************************************************************************
 //
@@ -269,6 +221,7 @@ void ADC0_init(void)
 void forward(void)
 {
     UART1Send((uint8_t *)"Move Forward\r\n", sizeof("Move Forward\r\n")-1);
+
     UARTSend((uint8_t *)"Move Forward\r\n", sizeof("Move Forward\r\n")-1);
 }
 
@@ -281,7 +234,7 @@ void backward(void)
 
 void left(void)
 {
-    UART1Send((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1);
+    UART1Send((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1) 
     UARTSend((uint8_t *)"Move Left\r\n", sizeof("Move Left\r\n")-1);
 }
 
@@ -300,7 +253,7 @@ void startPWM(void)
     // Turn RED and BLUE off
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
 
-    UART1Send((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1);
+    UART1Send((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1)     
     UARTSend((uint8_t *)"PWM Started\r\n", sizeof("PWM Started\r\n")-1);
 }
 
@@ -386,7 +339,7 @@ void UART1IntHandler(void)
             case 1:
 
                 // First character - BLUE
-                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_2);
+                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_2);
 
                 command[0] = inputChar;
 
@@ -396,7 +349,7 @@ void UART1IntHandler(void)
             case 2:
 
                 // Second character - RED
-                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_1);
+                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_1);
 
                 command[1] = inputChar;
 
@@ -405,7 +358,7 @@ void UART1IntHandler(void)
 
             case 0:
 
-                //GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
+                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1 | GPIO_PIN_2, 0);
 
                 command[2] = inputChar;
 
@@ -427,81 +380,6 @@ void UART1IntHandler(void)
 
                 break;
         }
-    }
-}
-
-//*****************************************************************************
-//                                                                             
-// ADC0 Sample Sequencer 3 Interrupt Handler                                                  
-//                                                                             
-//**************************************************************************** 
-
-volatile uint32_t adcValue = 0;
-volatile float sensorVoltage = 0.0f;
-
-void ADC0Seq3IntHandler(void)
-{
-    uint32_t result;
-
-    // Clear ADC interrupt
-    ADCIntClear(ADC0_BASE, 3);
-
-    // Read ADC conversion result
-    ADCSequenceDataGet(ADC0_BASE, 3, &result);
-
-    // Store result globally
-    adcValue = result;
-
-    // Convert ADC reading into voltage
-    sensorVoltage = ((float)result * 3.3f) / 4095.0f;
-    distance_cm = 12.5f / (sensorVoltage + 0.1f);
-}
-
-void UARTSendNumber(uint32_t number)
-{
-    char digits[10];
-    int i = 0;
-
-    if(number == 0)
-    {
-        UARTCharPut(UART0_BASE, '0');
-        return;
-    }
-
-    while(number > 0)
-    {
-        digits[i++] = '0' + (number % 10);
-        number /= 10;
-    }
-
-    while(i > 0)
-    {
-        UARTCharPut(UART0_BASE, digits[--i]);
-    }
-}
-
-void updateDistanceLED(float distance)
-{
-    if(distance >= 10.0f)
-    {
-        // GREEN
-        GPIOPinWrite(GPIO_PORTF_BASE,
-                     GPIO_PIN_1 | GPIO_PIN_3,
-                     GPIO_PIN_3);
-    }
-    else if(distance >= 8.0f)
-    {
-        // YELLOW (Red + Green)
-        GPIOPinWrite(GPIO_PORTF_BASE,
-                     GPIO_PIN_1 | GPIO_PIN_3,
-                     GPIO_PIN_1 | GPIO_PIN_3);
-    }
-    else
-    {
-        // RED
-        GPIOPinWrite(GPIO_PORTF_BASE,
-                     GPIO_PIN_1 | GPIO_PIN_3,
-                     GPIO_PIN_1);
     }
 }
 
@@ -540,10 +418,7 @@ main(void)
 
     UART1_init();
 
-    // no longer need PWM
-    // PWM_init();
-
-    ADC0_init();
+    PWM_init();
 
 
     // Enable processor interrupts after peripherals are initialized
@@ -570,9 +445,9 @@ main(void)
     // Start at 50% duty cycle
     //-------------------------------------------------------------------------
 
-    //uint32_t duty = pwmPeriod / 2;
+    uint32_t duty = pwmPeriod / 2;
 
-    //bool increasing = true;
+    bool increasing = true;
 
 
     //-------------------------------------------------------------------------
@@ -581,30 +456,42 @@ main(void)
 
     while(1)
     {
-        // Trigger ADC conversion
-        ADCProcessorTrigger(ADC0_BASE, 3);
+        if(pwmRunning)
+        {
+            // Increase duty cycle from 50% toward 100%
+            if(increasing)
+            {
+                duty += 5;
 
-        // Wait approximately 50 ms
-        SysCtlDelay(ROM_SysCtlClockGet() / 60);
+                if(duty >= pwmPeriod - 1)
+                {
+                    duty = pwmPeriod - 1;
 
-        // Update LED based on distance
-        updateDistanceLED(distance_cm);
+                    increasing = false;
+                }
+            }
 
-        // Print ADC reading
-        UARTSend((uint8_t *)"ADC: ", 5);
-        UARTSendNumber(adcValue);
+            // Decrease duty cycle toward 0%
+            else
+            {
+                if(duty > 5)
+                {
+                    duty -= 5;
+                }
 
-        // Print voltage in millivolts
-        uint32_t voltage_mV = (adcValue * 3300UL) / 4095UL;
+                else
+                {
+                    duty = 1;
 
-        UARTSend((uint8_t *)" | Voltage: ", 12);
-        UARTSendNumber(voltage_mV);
+                    increasing = true;
+                }
+            }
 
-        // Print estimated distance
-        UARTSend((uint8_t *)" mV | Distance: ", 16);
-        UARTSendNumber((uint32_t)distance_cm);
+            // Configure PWM with new pulse width
+            PWMPulseWidthSet(PWM1_BASE, PWM_OUT_7, duty);
 
-        UARTSend((uint8_t *)" cm\r\n", 5);
+            // Delay so brightness transition is visible
+            SysCtlDelay(ROM_SysCtlClockGet() / 300);
+        }
     }
-
 }
